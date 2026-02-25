@@ -32,7 +32,10 @@ def choose_skill_target_interactive(
     mode: str,
 ) -> int | None:
     action_text = "击杀" if mode == "kill" else "毒杀"
-    print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标（可选任意场上牌，含友方）")
+    print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标（默认不包含自己的战场牌）")
+    if not candidates:
+        print("没有可选目标：该牌回到你的手牌。")
+        return None
     for idx, target in enumerate(candidates):
         print(f"  [{idx}] 玩家{target.owner_id} 的《{target.card.name}》")
     while True:

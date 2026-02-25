@@ -126,27 +126,55 @@ def test_defeat_force_add_to_defeater_hand_and_remove_from_battlefield():
     target = PlacedCard(owner_id=pressure.player_id, card=make_card("神佑者", 5, False), visible_to={pressure.player_id})
     game.state.battlefield = [source, target]
 
-    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 1)
+    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 0)
 
     assert target not in game.state.battlefield
     assert target.card in attacker.hand
     assert id(target.card) in game.state.defeated_this_round
 
 
-def test_can_kill_friendly_target():
+def test_target_list_excludes_owner_battlefield_cards():
     game = CardGame(random.Random(2))
     game.setup_game()
     attacker = game.get_player_by_role(Role.ATTACKER)
+    pressure = game.get_player_by_role(Role.PRESSURE)
 
     source = PlacedCard(owner_id=attacker.player_id, card=make_card("铁手巴特", 4, True), visible_to={attacker.player_id})
-    friendly = PlacedCard(owner_id=attacker.player_id, card=make_card("神佑者", 5, False), visible_to={attacker.player_id})
-    game.state.battlefield = [source, friendly]
+    own_other = PlacedCard(owner_id=attacker.player_id, card=make_card("神佑者", 5, False), visible_to={attacker.player_id})
+    enemy = PlacedCard(owner_id=pressure.player_id, card=make_card("死手", 5, False), visible_to={pressure.player_id})
+    game.state.battlefield = [source, own_other, enemy]
 
-    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 1)
+    captured_candidates = []
 
-    assert friendly.card in attacker.hand
-    assert friendly not in game.state.battlefield
+    def chooser(_owner, _source, candidates, _mode):
+        captured_candidates.extend(candidates)
+        return 0
 
+    game.startup_phase(lambda _p, _c: True, target_chooser=chooser)
+
+    assert len(captured_candidates) == 1
+    assert captured_candidates[0].owner_id == pressure.player_id
+
+
+
+
+def test_no_target_returns_source_card_to_owner_hand_for_kill_and_poison():
+    game = CardGame(random.Random(12))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+
+    killer = PlacedCard(owner_id=attacker.player_id, card=make_card("铁手巴特", 4, True), visible_to={attacker.player_id})
+    witch = PlacedCard(owner_id=attacker.player_id, card=make_card("女巫", 5, True), visible_to={attacker.player_id})
+    game.state.battlefield = [killer, witch]
+
+    attacker_hand_before = len(attacker.hand)
+    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 0)
+
+    assert killer.card in attacker.hand
+    assert witch.card in attacker.hand
+    assert killer not in game.state.battlefield
+    assert witch not in game.state.battlefield
+    assert len(attacker.hand) == attacker_hand_before + 2
 
 def test_iron_priest_immune_to_kill_but_not_poison():
     game = CardGame(random.Random(3))
@@ -159,7 +187,7 @@ def test_iron_priest_immune_to_kill_but_not_poison():
     game.state.battlefield = [killer, priest]
 
     # 第4批圣言巴特尝试击杀铁臂祭司 -> 免疫，仍在场上
-    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 1)
+    game.startup_phase(lambda _p, _c: True, target_chooser=lambda *_args: 0)
     assert any(p.card.name == "铁臂祭司" for p in game.state.battlefield)
 
     # 直接验证毒杀可生效（不免疫）

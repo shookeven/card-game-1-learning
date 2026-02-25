@@ -157,8 +157,11 @@ class CardGame:
         if mode is None:
             return
 
-        candidates = list(self.state.battlefield)
+        candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
         if not candidates:
+            if source in self.state.battlefield:
+                self.state.battlefield.remove(source)
+                owner.hand.append(source.card)
             return
 
         if target_chooser is None:
