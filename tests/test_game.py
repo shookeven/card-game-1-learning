@@ -1,7 +1,30 @@
 import random
 
-from game.engine import CARD_COUNTS, CardGame
+from game.cards import CARD_COUNTS, TOTAL_CARDS
+from game.engine import CardGame
 from game.models import Role
+
+
+def test_card_definition_matches_official_pool():
+    expected = {
+        "天引": 1,
+        "快手杰克": 1,
+        "收割": 1,
+        "圣言巴特": 1,
+        "末日布道者": 1,
+        "女巫扫帚": 2,
+        "铁臂祭司": 2,
+        "拨钟": 2,
+        "逻各斯": 2,
+        "死手": 2,
+        "夜鸦": 2,
+        "女巫": 2,
+        "哈伯克拉底": 2,
+        "铁手巴特": 4,
+        "神佑者": 4,
+    }
+    assert CARD_COUNTS == expected
+    assert sum(CARD_COUNTS.values()) == TOTAL_CARDS == 29
 
 
 def test_deal_counts_are_correct():

@@ -4,21 +4,8 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
+from .cards import CARD_COUNTS
 from .models import Card, GameState, PlacedCard, Player, Role
-
-# 29 张牌（仅名称与数量）
-CARD_COUNTS: Dict[str, int] = {
-    "快手杰克": 1,
-    "铁手巴特": 4,
-    "红桃侦探": 3,
-    "沉默修女": 3,
-    "黑巷信使": 3,
-    "荒野医生": 3,
-    "暮色枪手": 3,
-    "老矿工": 3,
-    "酒馆老板": 3,
-    "风语者": 3,
-}
 
 PLAY_ORDER = [Role.ATTACKER, Role.PRESSURE, Role.SUPPORT]
 
