@@ -27,14 +27,25 @@ def test_card_definition_matches_official_pool():
     assert sum(CARD_COUNTS.values()) == TOTAL_CARDS == 29
 
 
-def test_deal_counts_are_correct():
+def test_attacker_claims_bottom_cards_after_role_assignment():
+    game = CardGame(random.Random(11))
+    game.setup_game()
+
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    assert len(attacker.hand) == 11
+    assert all(len(p.hand) == 9 for p in game.state.players if p.role != Role.ATTACKER)
+    assert len(game.state.claimed_bottom_cards) == 2
+    assert game.state.bottom_cards_claimed is True
+    assert len(game.state.bottom_cards) == 0
+
+
+def test_deal_counts_are_correct_after_bottom_claim():
     game = CardGame(random.Random(1))
     game.setup_game()
 
     assert sum(CARD_COUNTS.values()) == 29
-    assert all(len(p.hand) == 9 for p in game.state.players)
-    assert len(game.state.bottom_cards) == 2
     assert len(game.state.deck) == 0
+    assert sum(len(p.hand) for p in game.state.players) == 29
 
 
 def test_bottom_cards_are_open_information():
@@ -103,3 +114,20 @@ def test_victory_condition_when_defenders_cannot_play():
     failed = game.check_faction_failure()
     assert failed == "防守方"
     assert game.state.winner == "进攻方"
+
+
+def test_draw_when_all_players_cannot_play():
+    game = CardGame(random.Random(6))
+    game.setup_game()
+
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    pressure = game.get_player_by_role(Role.PRESSURE)
+    support = game.get_player_by_role(Role.SUPPORT)
+
+    attacker.hand.clear()
+    pressure.hand.clear()
+    support.hand.clear()
+
+    failed = game.check_faction_failure()
+    assert failed == "平局"
+    assert game.state.winner == "平局"

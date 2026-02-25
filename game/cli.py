@@ -34,10 +34,17 @@ def run_cli_game() -> None:
     for p in game.state.players:
         print(f"玩家{p.player_id} 角色：{p.role.value}")
 
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    claimed = ", ".join(card.name for card in game.state.claimed_bottom_cards)
+    print(f"进攻方玩家{attacker.player_id} 领取底牌：{claimed}（手牌 {len(attacker.hand)} 张）")
+
     while True:
         failed = game.check_faction_failure()
         if failed:
-            print(f"\n{failed}无牌可出，游戏结束！胜利方：{game.state.winner}")
+            if failed == "平局":
+                print("\n双方均无牌可出，游戏平局！")
+            else:
+                print(f"\n{failed}无牌可出，游戏结束！胜利方：{game.state.winner}")
             break
 
         print(f"\n--- 第 {game.state.round_number} 回合 ---")

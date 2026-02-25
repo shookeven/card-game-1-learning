@@ -38,7 +38,19 @@ class CardGame:
                 player.hand.append(self.state.deck.pop())
 
         self.state.bottom_cards = [self.state.deck.pop(), self.state.deck.pop()]
+        self.state.revealed_bottom_cards = list(self.state.bottom_cards)
         self.assign_roles()
+        self.claim_bottom_cards_for_attacker()
+
+    def claim_bottom_cards_for_attacker(self) -> None:
+        if self.state.bottom_cards_claimed:
+            return
+        attacker = self.get_player_by_role(Role.ATTACKER)
+        claimed = list(self.state.bottom_cards)
+        attacker.hand.extend(claimed)
+        self.state.claimed_bottom_cards = claimed
+        self.state.bottom_cards = []
+        self.state.bottom_cards_claimed = True
 
     def assign_roles(self) -> None:
         attacker: Optional[Player] = None
@@ -66,10 +78,16 @@ class CardGame:
         pressure = self.get_player_by_role(Role.PRESSURE)
         support = self.get_player_by_role(Role.SUPPORT)
 
-        if not attacker.can_play():
+        attacker_cannot_play = not attacker.can_play()
+        defenders_cannot_play = (not pressure.can_play()) and (not support.can_play())
+
+        if attacker_cannot_play and defenders_cannot_play:
+            self.state.winner = "平局"
+            return "平局"
+        if attacker_cannot_play:
             self.state.winner = "防守方"
             return "进攻方"
-        if not pressure.can_play() and not support.can_play():
+        if defenders_cannot_play:
             self.state.winner = "进攻方"
             return "防守方"
         return None
@@ -132,4 +150,4 @@ class CardGame:
         return {p.player_id: p.role for p in self.state.players}
 
     def bottom_card_names(self) -> Sequence[str]:
-        return [c.name for c in self.state.bottom_cards]
+        return [c.name for c in self.state.revealed_bottom_cards]

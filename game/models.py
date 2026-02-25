@@ -39,6 +39,9 @@ class GameState:
     players: List[Player]
     deck: List[Card]
     bottom_cards: List[Card] = field(default_factory=list)
+    revealed_bottom_cards: List[Card] = field(default_factory=list)
+    claimed_bottom_cards: List[Card] = field(default_factory=list)
+    bottom_cards_claimed: bool = False
     battlefield: List[PlacedCard] = field(default_factory=list)
     discard_pile: List[Card] = field(default_factory=list)
     round_number: int = 1
