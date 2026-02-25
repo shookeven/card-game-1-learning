@@ -14,6 +14,8 @@ class Role(Enum):
 @dataclass
 class Card:
     name: str
+    activation_batch: int
+    has_active_flip_effect: bool = False
 
 
 @dataclass

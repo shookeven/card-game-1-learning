@@ -1,8 +1,8 @@
 import random
 
-from game.cards import CARD_COUNTS, TOTAL_CARDS
+from game.cards import CARD_CONFIGS, CARD_COUNTS, STARTUP_BATCH_ORDER, TOTAL_CARDS
 from game.engine import CardGame
-from game.models import Role
+from game.models import Card, PlacedCard, Role
 
 
 def test_card_definition_matches_official_pool():
@@ -25,6 +25,23 @@ def test_card_definition_matches_official_pool():
     }
     assert CARD_COUNTS == expected
     assert sum(CARD_COUNTS.values()) == TOTAL_CARDS == 29
+
+
+def test_activation_batch_mapping_minimum_spec():
+    assert CARD_CONFIGS["天引"].activation_batch == 2
+    assert CARD_CONFIGS["快手杰克"].activation_batch == 2
+    assert CARD_CONFIGS["哈伯克拉底"].activation_batch == 3
+    assert CARD_CONFIGS["夜鸦"].activation_batch == 3
+    assert CARD_CONFIGS["女巫扫帚"].activation_batch == 3
+    assert CARD_CONFIGS["铁臂祭司"].activation_batch == 4
+    assert CARD_CONFIGS["收割"].activation_batch == 4
+    assert CARD_CONFIGS["铁手巴特"].activation_batch == 4
+    assert CARD_CONFIGS["圣言巴特"].activation_batch == 4
+    assert CARD_CONFIGS["女巫"].activation_batch == 5
+    assert CARD_CONFIGS["逻各斯"].activation_batch == 5
+    assert CARD_CONFIGS["拨钟"].activation_batch == 5
+    assert CARD_CONFIGS["神佑者"].activation_batch == 5
+    assert CARD_CONFIGS["末日布道者"].activation_batch == 5
 
 
 def test_attacker_claims_bottom_cards_after_role_assignment():
@@ -74,6 +91,78 @@ def test_play_order_and_support_visibility():
     support = game.get_player_by_role(Role.SUPPORT)
     pressure_placed = next(c for c in placed if c.owner_id == pressure.player_id)
     assert support.player_id in pressure_placed.visible_to
+
+
+def test_startup_phase_batch_progression_and_turn_order():
+    game = CardGame(random.Random(21))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    pressure = game.get_player_by_role(Role.PRESSURE)
+    support = game.get_player_by_role(Role.SUPPORT)
+
+    game.state.battlefield = [
+        PlacedCard(
+            owner_id=attacker.player_id,
+            card=Card(name="天引", activation_batch=2, has_active_flip_effect=True),
+            visible_to={attacker.player_id},
+        ),
+        PlacedCard(
+            owner_id=pressure.player_id,
+            card=Card(name="夜鸦", activation_batch=3, has_active_flip_effect=True),
+            visible_to={pressure.player_id, support.player_id},
+        ),
+        PlacedCard(
+            owner_id=support.player_id,
+            card=Card(name="铁手巴特", activation_batch=4, has_active_flip_effect=True),
+            visible_to={support.player_id},
+        ),
+    ]
+
+    seen_batches = []
+    asked = []
+
+    def decider(player, placed):
+        asked.append((player.role, placed.card.activation_batch, placed.card.name))
+        return False
+
+    game.startup_phase(decider, on_batch_start=seen_batches.append)
+
+    assert seen_batches == STARTUP_BATCH_ORDER
+    assert asked == [
+        (Role.ATTACKER, 2, "天引"),
+        (Role.PRESSURE, 3, "夜鸦"),
+        (Role.SUPPORT, 4, "铁手巴特"),
+    ]
+
+
+def test_startup_phase_skips_players_without_current_batch_cards():
+    game = CardGame(random.Random(22))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    support = game.get_player_by_role(Role.SUPPORT)
+
+    game.state.battlefield = [
+        PlacedCard(
+            owner_id=attacker.player_id,
+            card=Card(name="快手杰克", activation_batch=2, has_active_flip_effect=True),
+            visible_to={attacker.player_id},
+        ),
+        PlacedCard(
+            owner_id=support.player_id,
+            card=Card(name="神佑者", activation_batch=5, has_active_flip_effect=False),
+            visible_to={support.player_id},
+        ),
+    ]
+
+    asked_roles = []
+
+    def decider(player, _placed):
+        asked_roles.append(player.role)
+        return False
+
+    game.startup_phase(decider)
+
+    assert asked_roles == [Role.ATTACKER, Role.SUPPORT]
 
 
 def test_round_end_recovery_rules_with_and_without_flip():

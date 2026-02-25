@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .cards import CARD_COUNTS
+from .cards import CARD_COUNTS, STARTUP_BATCH_ORDER, get_activation_batch, has_active_flip_effect
 from .models import Card, GameState, PlacedCard, Player, Role
 
 PLAY_ORDER = [Role.ATTACKER, Role.PRESSURE, Role.SUPPORT]
@@ -25,7 +25,14 @@ class CardGame:
     def build_deck(self) -> List[Card]:
         deck: List[Card] = []
         for name, count in CARD_COUNTS.items():
-            deck.extend(Card(name=name) for _ in range(count))
+            deck.extend(
+                Card(
+                    name=name,
+                    activation_batch=get_activation_batch(name),
+                    has_active_flip_effect=has_active_flip_effect(name),
+                )
+                for _ in range(count)
+            )
         return deck
 
     def setup_game(self) -> None:
@@ -114,11 +121,25 @@ class CardGame:
 
         return self.state.battlefield
 
-    def startup_phase(self, flip_decider: Callable[[Player, PlacedCard], bool]) -> None:
-        for placed in self.state.battlefield:
-            owner = next(p for p in self.state.players if p.player_id == placed.owner_id)
-            if flip_decider(owner, placed):
-                placed.face_up = True
+    def startup_phase(
+        self,
+        flip_decider: Callable[[Player, PlacedCard], bool],
+        on_batch_start: Optional[Callable[[int], None]] = None,
+    ) -> None:
+        for batch in STARTUP_BATCH_ORDER:
+            if on_batch_start:
+                on_batch_start(batch)
+
+            for role in PLAY_ORDER:
+                player = self.get_player_by_role(role)
+                player_cards = [
+                    placed
+                    for placed in self.state.battlefield
+                    if placed.owner_id == player.player_id and placed.card.activation_batch == batch
+                ]
+                for placed in player_cards:
+                    if flip_decider(player, placed):
+                        placed.face_up = True
 
     def end_round(self) -> RoundResult:
         discarded: List[Card] = []

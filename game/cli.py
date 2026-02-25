@@ -56,7 +56,7 @@ def run_cli_game() -> None:
             if c.owner_id == pressure.player_id:
                 print(f"支援位提示：你可见抗压位放置的是《{c.card.name}》。")
 
-        game.startup_phase(decide_flip_interactive)
+        game.startup_phase(decide_flip_interactive, on_batch_start=lambda b: print(f"进入第{b}批次"))
         result = game.end_round()
 
         if result.no_flip_all_discarded:
