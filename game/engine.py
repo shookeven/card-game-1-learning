@@ -108,6 +108,8 @@ class CardGame:
 
         self.state.battlefield = []
         self.state.defeated_this_round = set()
+        self.state.silenced_this_round = set()
+
         for role in PLAY_ORDER:
             player = self.get_player_by_role(role)
             if not player.can_play():
@@ -126,6 +128,8 @@ class CardGame:
         return self.state.battlefield
 
     def _is_passive_kill_immune(self, placed: PlacedCard) -> bool:
+        if id(placed.card) in self.state.silenced_this_round:
+            return False
         return placed.card.name == "铁臂祭司"
 
     def _resolve_defeat(self, defeater: Player, target: PlacedCard, mode: str) -> bool:
@@ -139,67 +143,146 @@ class CardGame:
         defeater.hand.append(target.card)
         return True
 
+    def _force_replenish_from_hand(
+        self,
+        owner: Player,
+        replenish_chooser: Optional[Callable[[Player], int]],
+    ) -> None:
+        if not owner.can_play():
+            return
+        chosen = 0 if replenish_chooser is None else replenish_chooser(owner)
+        if chosen < 0 or chosen >= len(owner.hand):
+            raise ValueError(f"玩家{owner.player_id} 补放索引无效: {chosen}")
+
+        card = owner.hand.pop(chosen)
+        placed = PlacedCard(owner_id=owner.player_id, card=card, face_up=False, visible_to={owner.player_id})
+        if owner.role == Role.PRESSURE:
+            support = self.get_player_by_role(Role.SUPPORT)
+            placed.visible_to.add(support.player_id)
+        self.state.battlefield.append(placed)
+
     def _trigger_active_skill(
         self,
         owner: Player,
         source: PlacedCard,
         target_chooser: Optional[Callable[[Player, PlacedCard, List[PlacedCard], str], Optional[int]]],
-    ) -> None:
+        replenish_chooser: Optional[Callable[[Player], int]],
+        on_reveal_battlefield: Optional[Callable[[Player, List[PlacedCard]], None]],
+    ) -> bool:
         if id(source.card) in self.state.defeated_this_round:
-            return
+            return False
+        if id(source.card) in self.state.silenced_this_round:
+            return False
 
-        mode: Optional[str] = None
         if source.card.name in {"铁手巴特", "圣言巴特"}:
             mode = "kill"
-        elif source.card.name == "女巫":
+            candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
+            if not candidates:
+                if source in self.state.battlefield:
+                    self.state.battlefield.remove(source)
+                    owner.hand.append(source.card)
+                return False
+            target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
+            if target_index is None:
+                return False
+            if target_index < 0 or target_index >= len(candidates):
+                raise ValueError(f"无效目标索引: {target_index}")
+            self._resolve_defeat(owner, candidates[target_index], mode=mode)
+            return False
+
+        if source.card.name == "女巫":
             mode = "poison"
+            candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
+            if not candidates:
+                if source in self.state.battlefield:
+                    self.state.battlefield.remove(source)
+                    owner.hand.append(source.card)
+                return False
+            target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
+            if target_index is None:
+                return False
+            if target_index < 0 or target_index >= len(candidates):
+                raise ValueError(f"无效目标索引: {target_index}")
+            self._resolve_defeat(owner, candidates[target_index], mode=mode)
+            return False
 
-        if mode is None:
-            return
-
-        candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
-        if not candidates:
+        if source.card.name == "夜鸦":
+            if on_reveal_battlefield:
+                on_reveal_battlefield(owner, list(self.state.battlefield))
             if source in self.state.battlefield:
                 self.state.battlefield.remove(source)
-                owner.hand.append(source.card)
-            return
+                self.state.discard_pile.append(source.card)
+            self._force_replenish_from_hand(owner, replenish_chooser)
+            return True
 
-        if target_chooser is None:
-            target_index = 0
-        else:
-            target_index = target_chooser(owner, source, candidates, mode)
+        if source.card.name == "哈伯克拉底":
+            candidates = list(self.state.battlefield)
+            if candidates:
+                mode = "silence"
+                target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
+                if target_index is not None:
+                    if target_index < 0 or target_index >= len(candidates):
+                        raise ValueError(f"无效目标索引: {target_index}")
+                    self.state.silenced_this_round.add(id(candidates[target_index].card))
+            if source in self.state.battlefield:
+                self.state.battlefield.remove(source)
+                self.state.discard_pile.append(source.card)
+            self._force_replenish_from_hand(owner, replenish_chooser)
+            return True
 
-        if target_index is None:
-            return
-        if target_index < 0 or target_index >= len(candidates):
-            raise ValueError(f"无效目标索引: {target_index}")
-
-        self._resolve_defeat(owner, candidates[target_index], mode=mode)
+        return False
 
     def startup_phase(
         self,
         flip_decider: Callable[[Player, PlacedCard], bool],
         on_batch_start: Optional[Callable[[int], None]] = None,
         target_chooser: Optional[Callable[[Player, PlacedCard, List[PlacedCard], str], Optional[int]]] = None,
+        replenish_chooser: Optional[Callable[[Player], int]] = None,
+        on_reveal_battlefield: Optional[Callable[[Player, List[PlacedCard]], None]] = None,
+        on_startup_reset: Optional[Callable[[int], None]] = None,
     ) -> None:
-        for batch in STARTUP_BATCH_ORDER:
+        batch_index = 0
+        while batch_index < len(STARTUP_BATCH_ORDER):
+            batch = STARTUP_BATCH_ORDER[batch_index]
             if on_batch_start:
                 on_batch_start(batch)
 
+            restart_requested = False
             for role in PLAY_ORDER:
                 player = self.get_player_by_role(role)
                 player_cards = [
                     placed
                     for placed in self.state.battlefield
-                    if placed.owner_id == player.player_id and placed.card.activation_batch == batch
+                    if placed.owner_id == player.player_id
+                    and placed.card.activation_batch == batch
+                    and not placed.face_up
                 ]
                 for placed in player_cards:
                     if placed not in self.state.battlefield:
                         continue
                     if flip_decider(player, placed):
                         placed.face_up = True
-                        if placed.card.has_active_flip_effect and id(placed.card) not in self.state.defeated_this_round:
-                            self._trigger_active_skill(player, placed, target_chooser)
+                        if placed.card.has_active_flip_effect:
+                            should_reset = self._trigger_active_skill(
+                                player,
+                                placed,
+                                target_chooser,
+                                replenish_chooser,
+                                on_reveal_battlefield,
+                            )
+                            if should_reset:
+                                restart_requested = True
+                                break
+                if restart_requested:
+                    break
+
+            if restart_requested:
+                batch_index = 0
+                if on_startup_reset:
+                    on_startup_reset(STARTUP_BATCH_ORDER[0])
+                continue
+
+            batch_index += 1
 
     def end_round(self) -> RoundResult:
         discarded: List[Card] = []
@@ -211,6 +294,7 @@ class CardGame:
                 discarded.append(placed.card)
             self.state.discard_pile.extend(discarded)
             self.state.battlefield = []
+            self.state.silenced_this_round = set()
             self.state.round_number += 1
             return RoundResult(discarded=discarded, returned_to_hand=returned, no_flip_all_discarded=True)
 
@@ -224,6 +308,7 @@ class CardGame:
                 owner.hand.append(placed.card)
 
         self.state.battlefield = []
+        self.state.silenced_this_round = set()
         self.state.round_number += 1
         return RoundResult(discarded=discarded, returned_to_hand=returned, no_flip_all_discarded=False)
 

@@ -15,6 +15,17 @@ def choose_card_interactive(player: Player) -> int:
         print("输入无效，请重试。")
 
 
+def choose_replenish_card_interactive(player: Player) -> int:
+    print(f"玩家{player.player_id} 需要立刻补放1张背面牌：")
+    for idx, card in enumerate(player.hand):
+        print(f"  [{idx}] {card.name}")
+    while True:
+        raw = input("请选择补放手牌索引: ").strip()
+        if raw.isdigit() and 0 <= int(raw) < len(player.hand):
+            return int(raw)
+        print("输入无效，请重试。")
+
+
 def decide_flip_interactive(player: Player, placed: PlacedCard) -> bool:
     while True:
         raw = input(f"玩家{player.player_id} 是否翻面自己的牌《{placed.card.name}》? (y/n): ").strip().lower()
@@ -31,8 +42,17 @@ def choose_skill_target_interactive(
     candidates: list[PlacedCard],
     mode: str,
 ) -> int | None:
-    action_text = "击杀" if mode == "kill" else "毒杀"
-    print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标（默认不包含自己的战场牌）")
+    if mode == "kill":
+        action_text = "击杀"
+        extra = "（默认不包含自己的战场牌）"
+    elif mode == "poison":
+        action_text = "毒杀"
+        extra = "（默认不包含自己的战场牌）"
+    else:
+        action_text = "沉默"
+        extra = "（可选任意场上牌，含友方）"
+
+    print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标{extra}")
     if not candidates:
         print("没有可选目标：该牌回到你的手牌。")
         return None
@@ -45,6 +65,12 @@ def choose_skill_target_interactive(
         if raw.isdigit() and 0 <= int(raw) < len(candidates):
             return int(raw)
         print("输入无效，请重试。")
+
+
+def reveal_battlefield_once(player: Player, battlefield: list[PlacedCard]) -> None:
+    print(f"玩家{player.player_id} 通过夜鸦查看战场：")
+    for placed in battlefield:
+        print(f"  - 玩家{placed.owner_id}：《{placed.card.name}》")
 
 
 def run_cli_game() -> None:
@@ -82,6 +108,9 @@ def run_cli_game() -> None:
             decide_flip_interactive,
             on_batch_start=lambda b: print(f"进入第{b}批次"),
             target_chooser=choose_skill_target_interactive,
+            replenish_chooser=choose_replenish_card_interactive,
+            on_reveal_battlefield=reveal_battlefield_once,
+            on_startup_reset=lambda b: print(f"启动阶段已重置，重新从第{b}批开始"),
         )
         result = game.end_round()
 

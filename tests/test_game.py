@@ -248,3 +248,78 @@ def test_draw_when_all_players_cannot_play():
     failed = game.check_faction_failure()
     assert failed == "平局"
     assert game.state.winner == "平局"
+
+
+def test_night_crow_discards_replenishes_and_resets_startup_phase():
+    game = CardGame(random.Random(30))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    pressure = game.get_player_by_role(Role.PRESSURE)
+
+    night_crow = PlacedCard(owner_id=attacker.player_id, card=make_card("夜鸦", 3, True), visible_to={attacker.player_id})
+    other = PlacedCard(owner_id=pressure.player_id, card=make_card("神佑者", 5, False), visible_to={pressure.player_id})
+    game.state.battlefield = [night_crow, other]
+    attacker.hand = [make_card("死手", 5, False)]
+
+    batch_trace = []
+    reveals = []
+    game.startup_phase(
+        lambda _p, _c: True,
+        on_batch_start=batch_trace.append,
+        replenish_chooser=lambda _player: 0,
+        on_reveal_battlefield=lambda _player, battlefield: reveals.append(len(battlefield)),
+    )
+
+    assert night_crow.card in game.state.discard_pile
+    assert len(reveals) == 1
+    assert any(p.owner_id == attacker.player_id and p.card.name == "死手" for p in game.state.battlefield)
+    assert batch_trace[:4] == [2, 3, 2, 3]
+
+
+def test_hippocrates_silences_target_discards_replenishes_and_resets():
+    game = CardGame(random.Random(31))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    support = game.get_player_by_role(Role.SUPPORT)
+
+    hippocrates = PlacedCard(owner_id=attacker.player_id, card=make_card("哈伯克拉底", 3, True), visible_to={attacker.player_id})
+    saint = PlacedCard(owner_id=attacker.player_id, card=make_card("圣言巴特", 4, True), visible_to={attacker.player_id})
+    priest = PlacedCard(owner_id=support.player_id, card=make_card("铁臂祭司", 4, False), visible_to={support.player_id})
+    game.state.battlefield = [hippocrates, saint, priest]
+    attacker.hand = [make_card("神佑者", 5, False)]
+
+    batch_trace = []
+
+    def chooser(_owner, _source, candidates, mode):
+        if mode == "silence":
+            return next(i for i, c in enumerate(candidates) if c.card.name == "铁臂祭司")
+        if mode == "kill":
+            return 0
+        return None
+
+    game.startup_phase(
+        lambda _p, _c: True,
+        on_batch_start=batch_trace.append,
+        target_chooser=chooser,
+        replenish_chooser=lambda _player: 0,
+    )
+
+    assert hippocrates.card in game.state.discard_pile
+    assert batch_trace[:4] == [2, 3, 2, 3]
+    assert any(p.owner_id == attacker.player_id and p.card.name == "神佑者" for p in game.state.battlefield)
+    assert priest.card in attacker.hand  # 被沉默后，免疫被移除，可被圣言巴特击杀
+
+
+def test_silence_cleared_after_round_end():
+    game = CardGame(random.Random(32))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    support = game.get_player_by_role(Role.SUPPORT)
+
+    silenced_target = PlacedCard(owner_id=support.player_id, card=make_card("铁臂祭司", 4, False), visible_to={support.player_id})
+    game.state.battlefield = [silenced_target]
+    game.state.silenced_this_round.add(id(silenced_target.card))
+
+    game.end_round()
+
+    assert game.state.silenced_this_round == set()
