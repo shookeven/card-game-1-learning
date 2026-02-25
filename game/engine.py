@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .cards import CARD_COUNTS, STARTUP_BATCH_ORDER, get_activation_batch, has_active_flip_effect
+from .cards import CARD_COUNTS, STARTUP_BATCH_ORDER, get_activation_batch, get_batch_priority, has_active_flip_effect
 from .models import Card, GameState, PlacedCard, Player, Role
 
 PLAY_ORDER = [Role.ATTACKER, Role.PRESSURE, Role.SUPPORT]
@@ -29,6 +29,7 @@ class CardGame:
                 Card(
                     name=name,
                     activation_batch=get_activation_batch(name),
+                    batch_priority=get_batch_priority(name),
                     has_active_flip_effect=has_active_flip_effect(name),
                 )
                 for _ in range(count)
@@ -161,6 +162,16 @@ class CardGame:
             placed.visible_to.add(support.player_id)
         self.state.battlefield.append(placed)
 
+    def _return_source_to_owner_hand(self, owner: Player, source: PlacedCard) -> None:
+        if source in self.state.battlefield:
+            self.state.battlefield.remove(source)
+            owner.hand.append(source.card)
+
+    def _discard_source(self, source: PlacedCard) -> None:
+        if source in self.state.battlefield:
+            self.state.battlefield.remove(source)
+            self.state.discard_pile.append(source.card)
+
     def _trigger_active_skill(
         self,
         owner: Player,
@@ -168,6 +179,9 @@ class CardGame:
         target_chooser: Optional[Callable[[Player, PlacedCard, List[PlacedCard], str], Optional[int]]],
         replenish_chooser: Optional[Callable[[Player], int]],
         on_reveal_battlefield: Optional[Callable[[Player, List[PlacedCard]], None]],
+        target_player_chooser: Optional[Callable[[Player, PlacedCard, List[Player]], Optional[int]]],
+        revealed_card_chooser: Optional[Callable[[Player, PlacedCard, Player, List[Card]], Optional[int]]],
+        on_reveal_hand_cards: Optional[Callable[[Player, Player, List[Card]], None]],
     ) -> bool:
         if id(source.card) in self.state.defeated_this_round:
             return False
@@ -178,9 +192,7 @@ class CardGame:
             mode = "kill"
             candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
             if not candidates:
-                if source in self.state.battlefield:
-                    self.state.battlefield.remove(source)
-                    owner.hand.append(source.card)
+                self._return_source_to_owner_hand(owner, source)
                 return False
             target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
             if target_index is None:
@@ -194,9 +206,7 @@ class CardGame:
             mode = "poison"
             candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
             if not candidates:
-                if source in self.state.battlefield:
-                    self.state.battlefield.remove(source)
-                    owner.hand.append(source.card)
+                self._return_source_to_owner_hand(owner, source)
                 return False
             target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
             if target_index is None:
@@ -209,9 +219,7 @@ class CardGame:
         if source.card.name == "夜鸦":
             if on_reveal_battlefield:
                 on_reveal_battlefield(owner, list(self.state.battlefield))
-            if source in self.state.battlefield:
-                self.state.battlefield.remove(source)
-                self.state.discard_pile.append(source.card)
+            self._discard_source(source)
             self._force_replenish_from_hand(owner, replenish_chooser)
             return True
 
@@ -224,11 +232,70 @@ class CardGame:
                     if target_index < 0 or target_index >= len(candidates):
                         raise ValueError(f"无效目标索引: {target_index}")
                     self.state.silenced_this_round.add(id(candidates[target_index].card))
-            if source in self.state.battlefield:
-                self.state.battlefield.remove(source)
-                self.state.discard_pile.append(source.card)
+            self._discard_source(source)
             self._force_replenish_from_hand(owner, replenish_chooser)
             return True
+
+        if source.card.name == "快手杰克":
+            player_candidates = [p for p in self.state.players if p.player_id != owner.player_id]
+            if not player_candidates:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+            chosen_player_index = 0 if target_player_chooser is None else target_player_chooser(owner, source, player_candidates)
+            if chosen_player_index is None:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+            if chosen_player_index < 0 or chosen_player_index >= len(player_candidates):
+                raise ValueError(f"无效目标牌手索引: {chosen_player_index}")
+            target_player = player_candidates[chosen_player_index]
+            if not target_player.hand:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+
+            draw_count = min(2, len(target_player.hand))
+            shown_cards = self.rng.sample(target_player.hand, draw_count)
+            if on_reveal_hand_cards:
+                on_reveal_hand_cards(owner, target_player, list(shown_cards))
+
+            chosen_card_index = 0 if revealed_card_chooser is None else revealed_card_chooser(owner, source, target_player, shown_cards)
+            if chosen_card_index is None:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+            if chosen_card_index < 0 or chosen_card_index >= len(shown_cards):
+                raise ValueError(f"无效展示牌索引: {chosen_card_index}")
+
+            chosen_card = shown_cards[chosen_card_index]
+            target_player.hand.remove(chosen_card)
+            placed = PlacedCard(owner_id=owner.player_id, card=chosen_card, face_up=False, visible_to={owner.player_id})
+            if owner.role == Role.PRESSURE:
+                support = self.get_player_by_role(Role.SUPPORT)
+                placed.visible_to.add(support.player_id)
+            self.state.battlefield.append(placed)
+
+            self._discard_source(source)
+            return True
+
+        if source.card.name == "天引":
+            candidates = [placed for placed in self.state.battlefield if placed is not source]
+            if not candidates:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+
+            mode = "tianyin"
+            target_index = 0 if target_chooser is None else target_chooser(owner, source, candidates, mode)
+            if target_index is None:
+                self._return_source_to_owner_hand(owner, source)
+                return False
+            if target_index < 0 or target_index >= len(candidates):
+                raise ValueError(f"无效目标索引: {target_index}")
+
+            target = candidates[target_index]
+            if target in self.state.battlefield:
+                self.state.battlefield.remove(target)
+                owner.hand.append(target.card)
+
+            self._discard_source(source)
+            return False
 
         return False
 
@@ -240,6 +307,9 @@ class CardGame:
         replenish_chooser: Optional[Callable[[Player], int]] = None,
         on_reveal_battlefield: Optional[Callable[[Player, List[PlacedCard]], None]] = None,
         on_startup_reset: Optional[Callable[[int], None]] = None,
+        target_player_chooser: Optional[Callable[[Player, PlacedCard, List[Player]], Optional[int]]] = None,
+        revealed_card_chooser: Optional[Callable[[Player, PlacedCard, Player, List[Card]], Optional[int]]] = None,
+        on_reveal_hand_cards: Optional[Callable[[Player, Player, List[Card]], None]] = None,
     ) -> None:
         batch_index = 0
         while batch_index < len(STARTUP_BATCH_ORDER):
@@ -248,33 +318,39 @@ class CardGame:
                 on_batch_start(batch)
 
             restart_requested = False
-            for role in PLAY_ORDER:
-                player = self.get_player_by_role(role)
-                player_cards = [
-                    placed
-                    for placed in self.state.battlefield
-                    if placed.owner_id == player.player_id
-                    and placed.card.activation_batch == batch
-                    and not placed.face_up
-                ]
-                for placed in player_cards:
-                    if placed not in self.state.battlefield:
-                        continue
-                    if flip_decider(player, placed):
-                        placed.face_up = True
-                        if placed.card.has_active_flip_effect:
-                            should_reset = self._trigger_active_skill(
-                                player,
-                                placed,
-                                target_chooser,
-                                replenish_chooser,
-                                on_reveal_battlefield,
-                            )
-                            if should_reset:
-                                restart_requested = True
-                                break
-                if restart_requested:
-                    break
+            role_order = {role: idx for idx, role in enumerate(PLAY_ORDER)}
+            ordered_cards = [
+                placed
+                for placed in self.state.battlefield
+                if placed.card.activation_batch == batch and not placed.face_up
+            ]
+            ordered_cards.sort(
+                key=lambda placed: (
+                    placed.card.batch_priority,
+                    role_order[self.get_player_by_id(placed.owner_id).role],
+                )
+            )
+
+            for placed in ordered_cards:
+                if placed not in self.state.battlefield:
+                    continue
+                player = self.get_player_by_id(placed.owner_id)
+                if flip_decider(player, placed):
+                    placed.face_up = True
+                    if placed.card.has_active_flip_effect:
+                        should_reset = self._trigger_active_skill(
+                            player,
+                            placed,
+                            target_chooser,
+                            replenish_chooser,
+                            on_reveal_battlefield,
+                            target_player_chooser,
+                            revealed_card_chooser,
+                            on_reveal_hand_cards,
+                        )
+                        if should_reset:
+                            restart_requested = True
+                            break
 
             if restart_requested:
                 batch_index = 0

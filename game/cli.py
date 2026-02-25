@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .engine import CardGame
-from .models import PlacedCard, Player, Role
+from .models import Card, PlacedCard, Player, Role
 
 
 def choose_card_interactive(player: Player) -> int:
@@ -48,9 +48,12 @@ def choose_skill_target_interactive(
     elif mode == "poison":
         action_text = "毒杀"
         extra = "（默认不包含自己的战场牌）"
-    else:
+    elif mode == "silence":
         action_text = "沉默"
         extra = "（可选任意场上牌，含友方）"
+    else:
+        action_text = "天引"
+        extra = "（不能选择当前这张天引本身）"
 
     print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标{extra}")
     if not candidates:
@@ -63,6 +66,37 @@ def choose_skill_target_interactive(
         if raw == "":
             return None
         if raw.isdigit() and 0 <= int(raw) < len(candidates):
+            return int(raw)
+        print("输入无效，请重试。")
+
+
+def choose_target_player_interactive(player: Player, source: PlacedCard, candidates: list[Player]) -> int | None:
+    print(f"玩家{player.player_id} 的《{source.card.name}》：请选择目标牌手")
+    for idx, target_player in enumerate(candidates):
+        print(f"  [{idx}] 玩家{target_player.player_id}（手牌 {len(target_player.hand)}）")
+    while True:
+        raw = input("输入目标牌手索引（留空取消）：").strip()
+        if raw == "":
+            return None
+        if raw.isdigit() and 0 <= int(raw) < len(candidates):
+            return int(raw)
+        print("输入无效，请重试。")
+
+
+def reveal_hand_cards_once(owner: Player, target_player: Player, shown_cards: list[Card]) -> None:
+    names = "、".join(card.name for card in shown_cards)
+    print(f"玩家{owner.player_id} 查看玩家{target_player.player_id} 抽取到的牌：{names}")
+
+
+def choose_revealed_card_interactive(owner: Player, source: PlacedCard, target_player: Player, shown_cards: list[Card]) -> int | None:
+    print(f"玩家{owner.player_id} 的《{source.card.name}》：从展示牌中选择1张放置到自己战场（背面）")
+    for idx, card in enumerate(shown_cards):
+        print(f"  [{idx}] {card.name}")
+    while True:
+        raw = input("输入展示牌索引（留空取消）：").strip()
+        if raw == "":
+            return None
+        if raw.isdigit() and 0 <= int(raw) < len(shown_cards):
             return int(raw)
         print("输入无效，请重试。")
 
@@ -111,6 +145,9 @@ def run_cli_game() -> None:
             replenish_chooser=choose_replenish_card_interactive,
             on_reveal_battlefield=reveal_battlefield_once,
             on_startup_reset=lambda b: print(f"启动阶段已重置，重新从第{b}批开始"),
+            target_player_chooser=choose_target_player_interactive,
+            revealed_card_chooser=choose_revealed_card_interactive,
+            on_reveal_hand_cards=reveal_hand_cards_once,
         )
         result = game.end_round()
 
