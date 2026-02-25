@@ -25,6 +25,28 @@ def decide_flip_interactive(player: Player, placed: PlacedCard) -> bool:
         print("请输入 y 或 n。")
 
 
+def choose_skill_target_interactive(
+    player: Player,
+    source: PlacedCard,
+    candidates: list[PlacedCard],
+    mode: str,
+) -> int | None:
+    action_text = "击杀" if mode == "kill" else "毒杀"
+    print(f"玩家{player.player_id} 的《{source.card.name}》触发技能：请选择{action_text}目标（默认不包含自己的战场牌）")
+    if not candidates:
+        print("没有可选目标：该牌回到你的手牌。")
+        return None
+    for idx, target in enumerate(candidates):
+        print(f"  [{idx}] 玩家{target.owner_id} 的《{target.card.name}》")
+    while True:
+        raw = input("输入目标索引（留空取消）：").strip()
+        if raw == "":
+            return None
+        if raw.isdigit() and 0 <= int(raw) < len(candidates):
+            return int(raw)
+        print("输入无效，请重试。")
+
+
 def run_cli_game() -> None:
     game = CardGame()
     game.setup_game()
@@ -56,7 +78,11 @@ def run_cli_game() -> None:
             if c.owner_id == pressure.player_id:
                 print(f"支援位提示：你可见抗压位放置的是《{c.card.name}》。")
 
-        game.startup_phase(decide_flip_interactive, on_batch_start=lambda b: print(f"进入第{b}批次"))
+        game.startup_phase(
+            decide_flip_interactive,
+            on_batch_start=lambda b: print(f"进入第{b}批次"),
+            target_chooser=choose_skill_target_interactive,
+        )
         result = game.end_round()
 
         if result.no_flip_all_discarded:

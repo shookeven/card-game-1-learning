@@ -22,7 +22,7 @@ CARD_CONFIGS: Dict[str, CardConfig] = {
     "末日布道者": CardConfig(count=1, activation_batch=5, has_active_flip_effect=False),
     # 珍贵
     "女巫扫帚": CardConfig(count=2, activation_batch=3, has_active_flip_effect=True),
-    "铁臂祭司": CardConfig(count=2, activation_batch=4, has_active_flip_effect=True),
+    "铁臂祭司": CardConfig(count=2, activation_batch=4, has_active_flip_effect=False),
     "拨钟": CardConfig(count=2, activation_batch=5, has_active_flip_effect=True),
     "逻各斯": CardConfig(count=2, activation_batch=5, has_active_flip_effect=True),
     "死手": CardConfig(count=2, activation_batch=5, has_active_flip_effect=False),

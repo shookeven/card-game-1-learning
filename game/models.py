@@ -46,5 +46,6 @@ class GameState:
     bottom_cards_claimed: bool = False
     battlefield: List[PlacedCard] = field(default_factory=list)
     discard_pile: List[Card] = field(default_factory=list)
+    defeated_this_round: Set[int] = field(default_factory=set)
     round_number: int = 1
     winner: Optional[str] = None

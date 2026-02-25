@@ -80,6 +80,9 @@ class CardGame:
     def get_player_by_role(self, role: Role) -> Player:
         return next(p for p in self.state.players if p.role == role)
 
+    def get_player_by_id(self, player_id: int) -> Player:
+        return next(p for p in self.state.players if p.player_id == player_id)
+
     def check_faction_failure(self) -> Optional[str]:
         attacker = self.get_player_by_role(Role.ATTACKER)
         pressure = self.get_player_by_role(Role.PRESSURE)
@@ -104,6 +107,7 @@ class CardGame:
             return []
 
         self.state.battlefield = []
+        self.state.defeated_this_round = set()
         for role in PLAY_ORDER:
             player = self.get_player_by_role(role)
             if not player.can_play():
@@ -121,10 +125,62 @@ class CardGame:
 
         return self.state.battlefield
 
+    def _is_passive_kill_immune(self, placed: PlacedCard) -> bool:
+        return placed.card.name == "铁臂祭司"
+
+    def _resolve_defeat(self, defeater: Player, target: PlacedCard, mode: str) -> bool:
+        if target not in self.state.battlefield:
+            return False
+        if mode == "kill" and self._is_passive_kill_immune(target):
+            return False
+
+        self.state.battlefield.remove(target)
+        self.state.defeated_this_round.add(id(target.card))
+        defeater.hand.append(target.card)
+        return True
+
+    def _trigger_active_skill(
+        self,
+        owner: Player,
+        source: PlacedCard,
+        target_chooser: Optional[Callable[[Player, PlacedCard, List[PlacedCard], str], Optional[int]]],
+    ) -> None:
+        if id(source.card) in self.state.defeated_this_round:
+            return
+
+        mode: Optional[str] = None
+        if source.card.name in {"铁手巴特", "圣言巴特"}:
+            mode = "kill"
+        elif source.card.name == "女巫":
+            mode = "poison"
+
+        if mode is None:
+            return
+
+        candidates = [placed for placed in self.state.battlefield if placed.owner_id != owner.player_id]
+        if not candidates:
+            if source in self.state.battlefield:
+                self.state.battlefield.remove(source)
+                owner.hand.append(source.card)
+            return
+
+        if target_chooser is None:
+            target_index = 0
+        else:
+            target_index = target_chooser(owner, source, candidates, mode)
+
+        if target_index is None:
+            return
+        if target_index < 0 or target_index >= len(candidates):
+            raise ValueError(f"无效目标索引: {target_index}")
+
+        self._resolve_defeat(owner, candidates[target_index], mode=mode)
+
     def startup_phase(
         self,
         flip_decider: Callable[[Player, PlacedCard], bool],
         on_batch_start: Optional[Callable[[int], None]] = None,
+        target_chooser: Optional[Callable[[Player, PlacedCard, List[PlacedCard], str], Optional[int]]] = None,
     ) -> None:
         for batch in STARTUP_BATCH_ORDER:
             if on_batch_start:
@@ -138,8 +194,12 @@ class CardGame:
                     if placed.owner_id == player.player_id and placed.card.activation_batch == batch
                 ]
                 for placed in player_cards:
+                    if placed not in self.state.battlefield:
+                        continue
                     if flip_decider(player, placed):
                         placed.face_up = True
+                        if placed.card.has_active_flip_effect and id(placed.card) not in self.state.defeated_this_round:
+                            self._trigger_active_skill(player, placed, target_chooser)
 
     def end_round(self) -> RoundResult:
         discarded: List[Card] = []
@@ -160,7 +220,7 @@ class CardGame:
                 self.state.discard_pile.append(placed.card)
             else:
                 returned.append(placed.card)
-                owner = next(p for p in self.state.players if p.player_id == placed.owner_id)
+                owner = self.get_player_by_id(placed.owner_id)
                 owner.hand.append(placed.card)
 
         self.state.battlefield = []
