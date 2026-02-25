@@ -1,12 +1,12 @@
 import random
 
-from game.cards import CARD_CONFIGS, CARD_COUNTS, STARTUP_BATCH_ORDER, TOTAL_CARDS
+from game.cards import CARD_CONFIGS, CARD_COUNTS, STARTUP_BATCH_ORDER, TOTAL_CARDS, get_batch_priority
 from game.engine import CardGame
 from game.models import Card, PlacedCard, Role
 
 
-def make_card(name: str, batch: int, active: bool) -> Card:
-    return Card(name=name, activation_batch=batch, has_active_flip_effect=active)
+def make_card(name: str, batch: int, active: bool, priority: int | None = None) -> Card:
+    return Card(name=name, activation_batch=batch, batch_priority=(get_batch_priority(name) if priority is None else priority), has_active_flip_effect=active)
 
 
 def test_card_definition_matches_official_pool():
@@ -46,6 +46,14 @@ def test_activation_batch_mapping_minimum_spec():
     assert CARD_CONFIGS["拨钟"].activation_batch == 5
     assert CARD_CONFIGS["神佑者"].activation_batch == 5
     assert CARD_CONFIGS["末日布道者"].activation_batch == 5
+
+def test_batch_priority_mapping_mvp_rule_order():
+    assert CARD_CONFIGS["天引"].batch_priority < CARD_CONFIGS["快手杰克"].batch_priority
+    assert CARD_CONFIGS["哈伯克拉底"].batch_priority < CARD_CONFIGS["夜鸦"].batch_priority < CARD_CONFIGS["女巫扫帚"].batch_priority
+    assert CARD_CONFIGS["铁臂祭司"].batch_priority < CARD_CONFIGS["收割"].batch_priority < CARD_CONFIGS["铁手巴特"].batch_priority
+    assert CARD_CONFIGS["铁手巴特"].batch_priority == CARD_CONFIGS["圣言巴特"].batch_priority
+    assert CARD_CONFIGS["女巫"].batch_priority < CARD_CONFIGS["逻各斯"].batch_priority < CARD_CONFIGS["拨钟"].batch_priority
+    assert CARD_CONFIGS["神佑者"].batch_priority > CARD_CONFIGS["拨钟"].batch_priority
 
 
 def test_attacker_claims_bottom_cards_after_role_assignment():
@@ -430,3 +438,49 @@ def test_tianyin_no_candidate_returns_to_hand():
 
     assert tianyin.card in attacker.hand
     assert tianyin.card not in game.state.discard_pile
+
+
+def test_batch2_priority_order_tianyin_before_fast_jack_even_after_reset():
+    game = CardGame(random.Random(120))
+    game.setup_game()
+    attacker = game.get_player_by_role(Role.ATTACKER)
+    pressure = game.get_player_by_role(Role.PRESSURE)
+
+    fast_jack = PlacedCard(owner_id=attacker.player_id, card=make_card("快手杰克", 2, True), visible_to={attacker.player_id})
+    tianyin = PlacedCard(owner_id=pressure.player_id, card=make_card("天引", 2, True), visible_to={pressure.player_id})
+    extra = PlacedCard(owner_id=attacker.player_id, card=make_card("神佑者", 5, False), visible_to={attacker.player_id})
+    game.state.battlefield = [fast_jack, tianyin, extra]
+    attacker.hand = [make_card("死手", 5, False)]
+    pressure.hand = [make_card("逻各斯", 5, True)]
+
+    batch2_order = []
+    current_batch = {"value": None}
+
+    def on_batch(batch):
+        current_batch["value"] = batch
+
+    def flip_decider(_player, _placed):
+        return True
+
+    def target_chooser(_owner, source, candidates, mode):
+        if current_batch["value"] == 2 and mode in {"tianyin", "kill", "poison"}:
+            batch2_order.append(source.card.name)
+        if mode == "tianyin":
+            return next(i for i, c in enumerate(candidates) if c.card.name == "神佑者")
+        return 0
+
+    def target_player_chooser(_owner, source, players):
+        if current_batch["value"] == 2:
+            batch2_order.append(source.card.name)
+        return 0
+
+    game.startup_phase(
+        flip_decider,
+        on_batch_start=on_batch,
+        target_chooser=target_chooser,
+        target_player_chooser=target_player_chooser,
+        revealed_card_chooser=lambda *_args: 0,
+        on_startup_reset=lambda _b: None,
+    )
+
+    assert batch2_order[0] == "天引"

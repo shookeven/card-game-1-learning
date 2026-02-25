@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .cards import CARD_COUNTS, STARTUP_BATCH_ORDER, get_activation_batch, has_active_flip_effect
+from .cards import CARD_COUNTS, STARTUP_BATCH_ORDER, get_activation_batch, get_batch_priority, has_active_flip_effect
 from .models import Card, GameState, PlacedCard, Player, Role
 
 PLAY_ORDER = [Role.ATTACKER, Role.PRESSURE, Role.SUPPORT]
@@ -29,6 +29,7 @@ class CardGame:
                 Card(
                     name=name,
                     activation_batch=get_activation_batch(name),
+                    batch_priority=get_batch_priority(name),
                     has_active_flip_effect=has_active_flip_effect(name),
                 )
                 for _ in range(count)
@@ -317,36 +318,39 @@ class CardGame:
                 on_batch_start(batch)
 
             restart_requested = False
-            for role in PLAY_ORDER:
-                player = self.get_player_by_role(role)
-                player_cards = [
-                    placed
-                    for placed in self.state.battlefield
-                    if placed.owner_id == player.player_id
-                    and placed.card.activation_batch == batch
-                    and not placed.face_up
-                ]
-                for placed in player_cards:
-                    if placed not in self.state.battlefield:
-                        continue
-                    if flip_decider(player, placed):
-                        placed.face_up = True
-                        if placed.card.has_active_flip_effect:
-                            should_reset = self._trigger_active_skill(
-                                player,
-                                placed,
-                                target_chooser,
-                                replenish_chooser,
-                                on_reveal_battlefield,
-                                target_player_chooser,
-                                revealed_card_chooser,
-                                on_reveal_hand_cards,
-                            )
-                            if should_reset:
-                                restart_requested = True
-                                break
-                if restart_requested:
-                    break
+            role_order = {role: idx for idx, role in enumerate(PLAY_ORDER)}
+            ordered_cards = [
+                placed
+                for placed in self.state.battlefield
+                if placed.card.activation_batch == batch and not placed.face_up
+            ]
+            ordered_cards.sort(
+                key=lambda placed: (
+                    placed.card.batch_priority,
+                    role_order[self.get_player_by_id(placed.owner_id).role],
+                )
+            )
+
+            for placed in ordered_cards:
+                if placed not in self.state.battlefield:
+                    continue
+                player = self.get_player_by_id(placed.owner_id)
+                if flip_decider(player, placed):
+                    placed.face_up = True
+                    if placed.card.has_active_flip_effect:
+                        should_reset = self._trigger_active_skill(
+                            player,
+                            placed,
+                            target_chooser,
+                            replenish_chooser,
+                            on_reveal_battlefield,
+                            target_player_chooser,
+                            revealed_card_chooser,
+                            on_reveal_hand_cards,
+                        )
+                        if should_reset:
+                            restart_requested = True
+                            break
 
             if restart_requested:
                 batch_index = 0

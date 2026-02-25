@@ -15,6 +15,7 @@ class Role(Enum):
 class Card:
     name: str
     activation_batch: int
+    batch_priority: int = 99
     has_active_flip_effect: bool = False
 
 
